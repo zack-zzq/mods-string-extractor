@@ -1,6 +1,6 @@
 [project]
 name = "mods-string-extractor"
-version = "1.0.0"
+version = "1.0.1"
 description = "Extract translatable strings from Minecraft modpack mods and pack translations into resource packs"
 readme = "README.md"
 license = { text = "MIT" }

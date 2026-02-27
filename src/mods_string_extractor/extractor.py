@@ -18,10 +18,13 @@ class ExtractionResult:
     jar_name: str
     namespaces: dict[str, dict[str, str]] = field(default_factory=dict)
     """Mapping of modid -> {key: en_us_value} for untranslated strings."""
+    
+    patchouli: dict[str, dict[str, str]] = field(default_factory=dict)
+    """Mapping of modid -> {file_path: en_us_value} for patchouli books."""
 
     @property
     def total_keys(self) -> int:
-        return sum(len(v) for v in self.namespaces.values())
+        return sum(len(v) for v in self.namespaces.values()) + sum(len(v) for v in self.patchouli.values())
 
 
 def _find_lang_namespaces(jar: zipfile.ZipFile) -> dict[str, list[str]]:
@@ -42,6 +45,51 @@ def _find_lang_namespaces(jar: zipfile.ZipFile) -> dict[str, list[str]]:
             modid = parts[1]
             namespaces.setdefault(modid, []).append(name)
     return namespaces
+
+def _find_patchouli_files(jar: zipfile.ZipFile) -> dict[str, list[str]]:
+    """Find all patchouli book en_us json files in the jar.
+
+    Returns a dict of modid -> list of en_us json file paths.
+    """
+    patchouli_files: dict[str, list[str]] = {}
+    for name in jar.namelist():
+        # Match pattern: data/<modid>/patchouli_books/<book...>/en_us/**/*.json
+        parts = name.split("/")
+        if len(parts) >= 6 and parts[0] == "data" and parts[2] == "patchouli_books":
+            # Finding the en_us part of the hierarchy
+            try:
+                en_us_idx = parts.index("en_us")
+                if parts[-1].endswith(".json"):
+                    modid = parts[1]
+                    patchouli_files.setdefault(modid, []).append(name)
+            except ValueError:
+                pass
+    return patchouli_files
+
+def _extract_patchouli_strings(data: dict | list | str, path: str = "") -> dict[str, str]:
+    """Recursively extract translatable strings from Patchouli JSON AST."""
+    strings = {}
+    target_keys = {"name", "text", "title", "description"}
+    
+    if isinstance(data, dict):
+        for k, v in data.items():
+            new_path = f"{path}.{k}" if path else k
+            if k in target_keys and isinstance(v, str) and v.strip():
+                # Don't translate pure macro calls or empty strings
+                if not v.startswith("$(macrolink"):
+                    strings[new_path] = v
+            elif isinstance(v, (dict, list)):
+                strings.update(_extract_patchouli_strings(v, new_path))
+    elif isinstance(data, list):
+        for i, item in enumerate(data):
+            new_path = f"{path}[{i}]"
+            if isinstance(item, (dict, list, str)):
+                if isinstance(item, str) and item.strip() and not item.startswith("$(macrolink"):
+                     strings[new_path] = item
+                else:
+                    strings.update(_extract_patchouli_strings(item, new_path))
+            
+    return strings
 
 
 def _read_json_from_jar(jar: zipfile.ZipFile, path: str) -> dict[str, str]:
@@ -107,6 +155,46 @@ def extract_mod(jar_path: Path) -> ExtractionResult:
                         len(en_us),
                     )
 
+            # --- Patchouli Extraction ---
+            patchouli_files = _find_patchouli_files(jar)
+            for modid, en_us_paths in patchouli_files.items():
+                mod_patchouli = {}
+                for en_us_path in en_us_paths:
+                    # Deriving the zh_cn equivalent path
+                    parts = en_us_path.split("/")
+                    en_us_idx = parts.index("en_us")
+                    zh_cn_parts = list(parts)
+                    zh_cn_parts[en_us_idx] = "zh_cn"
+                    zh_cn_path = "/".join(zh_cn_parts)
+                    
+                    en_ast = _read_json_from_jar(jar, en_us_path)
+                    if not en_ast:
+                        continue
+                        
+                    en_strings = _extract_patchouli_strings(en_ast)
+                    if not en_strings:
+                        continue
+                        
+                    zh_strings = {}
+                    if zh_cn_path in jar.namelist():
+                        zh_ast = _read_json_from_jar(jar, zh_cn_path)
+                        zh_strings = _extract_patchouli_strings(zh_ast)
+                    
+                    # Prefix with file path to resolve uniqueness across multiple files
+                    # Example key: "data/my_mod/patchouli_books/manual/en_us/entries/intro.json::pages[0].text"
+                    for json_path, string_val in en_strings.items():
+                        if json_path not in zh_strings or zh_strings[json_path] == string_val:
+                            # It's either missing in zh_cn OR it's present in zh_cn but still untranslated (equals en_us)
+                            flat_key = f"{en_us_path}::{json_path}"
+                            mod_patchouli[flat_key] = string_val
+                            
+                if mod_patchouli:
+                    result.patchouli[modid] = mod_patchouli
+                    logger.info(
+                        "[%s/%s] extracted %d patchouli translatable strings",
+                        jar_path.name, modid, len(mod_patchouli)
+                    )
+
     except zipfile.BadZipFile:
         logger.warning("Skipping invalid jar: %s", jar_path.name)
     except Exception as e:
@@ -160,6 +248,22 @@ def extract_mods(mods_dir: Path, output_dir: Path) -> list[ExtractionResult]:
                 encoding="utf-8",
             )
             total_keys += len(strings)
+
+        for modid, patchouli_strings in result.patchouli.items():
+            mod_output_dir = output_dir / modid
+            mod_output_dir.mkdir(parents=True, exist_ok=True)
+            output_file = mod_output_dir / "patchouli.json"
+
+            if output_file.exists():
+                existing = json.loads(output_file.read_text(encoding="utf-8"))
+                existing.update(patchouli_strings)
+                patchouli_strings = existing
+
+            output_file.write_text(
+                json.dumps(patchouli_strings, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            total_keys += len(patchouli_strings)
 
     logger.info(
         "Extraction complete: %d mods processed, %d namespaces, %d total keys",
