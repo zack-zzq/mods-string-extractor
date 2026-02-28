@@ -62,12 +62,7 @@ def _replace_patchouli_strings(data: dict | list | str, translations: dict[str, 
         new_list = []
         for i, item in enumerate(data):
             new_path = f"{current_path}[{i}]"
-            if isinstance(item, str) and item.strip() and not item.startswith("$(macrolink"):
-                if new_path in translations:
-                    new_list.append(translations[new_path])
-                else:
-                    new_list.append(item)
-            elif isinstance(item, (dict, list)):
+            if isinstance(item, (dict, list)):
                 new_list.append(_replace_patchouli_strings(item, translations, new_path))
             else:
                 new_list.append(item)
@@ -177,13 +172,25 @@ def pack_resourcepack(
                                         ast_bytes = jar.read(en_us_path)
                                         ast = json.loads(ast_bytes)
                                         
-                                        # Recursively replace strings
-                                        localized_ast = _replace_patchouli_strings(ast, file_translations)
-                                        
+                                        from .extractor import _extract_patchouli_strings
                                         # Construct zh_cn target path
                                         parts = en_us_path.split("/")
                                         try:
                                             en_us_idx = parts.index("en_us")
+                                            zh_cn_parts = parts.copy()
+                                            zh_cn_parts[en_us_idx] = "zh_cn"
+                                            
+                                            zh_cn_path_in_jar = "/".join(zh_cn_parts)
+                                            merged_translations = {}
+                                            if zh_cn_path_in_jar in jar.namelist():
+                                                zh_ast = json.loads(jar.read(zh_cn_path_in_jar))
+                                                merged_translations = _extract_patchouli_strings(zh_ast)
+                                            
+                                            merged_translations.update(file_translations)
+                                            
+                                            # Recursively replace strings
+                                            localized_ast = _replace_patchouli_strings(ast, merged_translations)
+                                            
                                             parts[en_us_idx] = "zh_cn"
                                             # Also replace data/ -> assets/
                                             if parts[0] == "data":

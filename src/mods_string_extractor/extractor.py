@@ -83,11 +83,8 @@ def _extract_patchouli_strings(data: dict | list | str, path: str = "") -> dict[
     elif isinstance(data, list):
         for i, item in enumerate(data):
             new_path = f"{path}[{i}]"
-            if isinstance(item, (dict, list, str)):
-                if isinstance(item, str) and item.strip() and not item.startswith("$(macrolink"):
-                     strings[new_path] = item
-                else:
-                    strings.update(_extract_patchouli_strings(item, new_path))
+            if isinstance(item, (dict, list)):
+                strings.update(_extract_patchouli_strings(item, new_path))
             
     return strings
 
