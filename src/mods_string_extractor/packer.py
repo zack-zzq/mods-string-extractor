@@ -42,7 +42,7 @@ def _get_jar_for_modid(mods_dir: Path, target_modid: str) -> Path | None:
 
 def _replace_patchouli_strings(data: dict | list | str, translations: dict[str, str], current_path: str = "") -> dict | list | str:
     """Recursively replace string values in Patchouli JSON using the flat translations map."""
-    target_keys = {"name", "text", "title", "description"}
+    target_keys = {"name", "text", "title", "description", "advancement_text", "subtitle", "link_text", "label"}
     
     if isinstance(data, dict):
         new_dict = {}
@@ -185,6 +185,9 @@ def pack_resourcepack(
                                         try:
                                             en_us_idx = parts.index("en_us")
                                             parts[en_us_idx] = "zh_cn"
+                                            # Also replace data/ -> assets/
+                                            if parts[0] == "data":
+                                                parts[0] = "assets"
                                             zh_cn_output_path = "/".join(parts)
                                             
                                             zf.writestr(

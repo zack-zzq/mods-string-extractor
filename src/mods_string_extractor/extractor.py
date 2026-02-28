@@ -69,7 +69,7 @@ def _find_patchouli_files(jar: zipfile.ZipFile) -> dict[str, list[str]]:
 def _extract_patchouli_strings(data: dict | list | str, path: str = "") -> dict[str, str]:
     """Recursively extract translatable strings from Patchouli JSON AST."""
     strings = {}
-    target_keys = {"name", "text", "title", "description"}
+    target_keys = {"name", "text", "title", "description", "advancement_text", "subtitle", "link_text", "label"}
     
     if isinstance(data, dict):
         for k, v in data.items():
