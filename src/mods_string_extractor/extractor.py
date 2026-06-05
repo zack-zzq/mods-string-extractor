@@ -124,9 +124,12 @@ def extract_mod(jar_path: Path) -> ExtractionResult:
                     continue
 
                 if zh_cn_path in lang_files:
-                    # Diff mode: only extract keys missing from zh_cn
+                    # Diff mode: extract keys missing from zh_cn OR with untranslated values (same as en_us)
                     zh_cn = _read_json_from_jar(jar, zh_cn_path)
-                    diff = {k: v for k, v in en_us.items() if k not in zh_cn}
+                    diff = {
+                        k: v for k, v in en_us.items()
+                        if k not in zh_cn or zh_cn[k] == v
+                    }
                     if diff:
                         result.namespaces[modid] = diff
                         logger.info(
